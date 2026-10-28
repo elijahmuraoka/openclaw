@@ -29,9 +29,13 @@ export function resolveReplyOperationRunState(
 /** Either source owner can prevent its retained background work from adding delivery. */
 export function resolveReplySessionEventDelivery(
   options: object | undefined,
-  run: { internalEventExecution?: Pick<SessionEventExecution, "deliver"> },
+  run: {
+    internalEventExecution?: Pick<SessionEventExecution, "deliver">;
+    sessionEventDelivery?: false;
+  },
 ): false | undefined {
   return run.internalEventExecution?.deliver === false ||
+    run.sessionEventDelivery === false ||
     resolveReplyOperationRunState(options)?.sessionEventDelivery === false
     ? false
     : undefined;

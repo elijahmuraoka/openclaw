@@ -4,6 +4,7 @@ import * as runs from "../agents/embedded-agent-runner/runs.js";
 import type { runEmbeddedAgent as executeEmbeddedAgent } from "../agents/embedded-agent.js";
 import { enqueueSessionEventForHost } from "../auto-reply/reply/session-event-handoff.js";
 import { loadSessionEntry, patchSessionEntryCore } from "../config/sessions/session-accessor.js";
+import { getAgentRunContext } from "../infra/agent-run-registry.js";
 import { waitForGatewayActiveWork } from "../infra/gateway-active-work.js";
 import type { RespondFn } from "./server-methods/types.js";
 
@@ -58,14 +59,21 @@ export function registerGoalAutomaticContinuationCases(
   });
 
   // A background exec completion is admitted as a session-event turn. Its Goal
-  // successor must outlive that event's occurrence, signal, and one-shot delivery.
-  const completeExecDuringFirstTurn = (onEventTurn: () => Promise<void>) => {
+  // successor must outlive that event's occurrence, signal, and one-shot delivery,
+  // while keeping an explicitly silent completion's delivery restriction.
+  const completeExecDuringFirstTurn = (
+    onEventTurn: () => Promise<void>,
+    event: { deliver?: false } = {},
+  ) => {
     const prompts: string[] = [];
+    const delivery: Array<false | undefined> = [];
     runEmbeddedAgent.mockImplementation(async (params) => {
       prompts.push(params.prompt);
+      delivery.push(getAgentRunContext(params.runId)?.sessionEventDelivery);
       if (runEmbeddedAgent.mock.calls.length === 1) {
         enqueueSessionEventForHost("Background exec completed", {
           ...scope(),
+          ...event,
           source: "exec",
           sourceTurnId: "exec:goal-background",
         });
@@ -74,16 +82,23 @@ export function registerGoalAutomaticContinuationCases(
       }
       return result(params.sessionId);
     });
-    return prompts;
+    return { prompts, delivery };
   };
-  it("keeps pursuing after a background exec completion takes the next turn", async () => {
+  it.each([
+    { name: "a background exec completion", event: {}, successorDelivery: undefined },
+    {
+      name: "an explicitly silent completion",
+      event: { deliver: false },
+      successorDelivery: false,
+    },
+  ] as const)("keeps pursuing after $name takes the next turn", async (testCase) => {
     const completed = createDeferred();
-    const prompts = completeExecDuringFirstTurn(async () => {
+    const { prompts, delivery } = completeExecDuringFirstTurn(async () => {
       if (runEmbeddedAgent.mock.calls.length === 4) {
         await setGoalStatus("complete");
         completed.resolve();
       }
-    });
+    }, testCase.event);
     await start("Finish after the transfer");
     await completed.promise;
     await expectDrained();
@@ -91,18 +106,28 @@ export function registerGoalAutomaticContinuationCases(
     expect(prompts[1]).toContain("Background exec completed");
     expect(prompts[2]).toContain("Advance");
     expect(prompts[3]).toContain("Advance");
+    // Goal successors keep the completion's automatic-delivery restriction.
+    expect(delivery).toEqual([
+      undefined,
+      testCase.successorDelivery,
+      testCase.successorDelivery,
+      testCase.successorDelivery,
+    ]);
     expect(loadSessionEntry(scope())?.goal).toMatchObject({
       status: "complete",
       continuationTurns: 2,
     });
   });
 
-  it("does not continue past a pause made during a background exec completion turn", async () => {
+  it.each([
+    { name: "a background exec completion", event: {} },
+    { name: "an explicitly silent completion", event: { deliver: false } },
+  ] as const)("does not continue past a pause made during $name turn", async ({ event }) => {
     completeExecDuringFirstTurn(async () => {
       if (runEmbeddedAgent.mock.calls.length === 2) {
         await setGoalStatus("paused");
       }
-    });
+    }, event);
     await start("Pause while the transfer reports");
     await expectDrained();
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);

@@ -221,14 +221,19 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   // A session-event turn (for example a background exec completion) owns an
   // occurrence-scoped signal, settlement hooks, and one-shot source delivery that
   // all end when the event settles. The Goal turn outlives that occurrence, so it
-  // keeps only its own cancellation and the session's ordinary routed delivery.
-  const eventSource = Boolean(base.run.internalEventExecution);
-  const sourceSignal = eventSource ? undefined : base.abortSignal;
+  // keeps only its own cancellation and the session's ordinary routed delivery,
+  // plus the event's explicit delivery suppression as a run-owned policy.
+  const sourceEvent = base.run.internalEventExecution;
+  const sourceSignal = sourceEvent ? undefined : base.abortSignal;
   const nudge: FollowupRun = {
     ...transcript,
-    ...(eventSource
+    ...(sourceEvent
       ? {
-          run: { ...transcript.run, internalEventExecution: undefined },
+          run: {
+            ...transcript.run,
+            internalEventExecution: undefined,
+            ...(sourceEvent.deliver === false ? { sessionEventDelivery: false as const } : {}),
+          },
           queuedFollowupReplyDisposition: undefined,
         }
       : {}),
