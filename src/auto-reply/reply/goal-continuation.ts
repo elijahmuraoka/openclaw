@@ -211,19 +211,32 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   }
   const base = params.base;
   const cancellation = new AbortController();
+  const transcript = buildTranscriptFollowupRun(base, {
+    prompt:
+      "Advance the active goal; keep it active until fully achieved. Use the current goal context, and verify the entire objective before marking it complete.",
+    sourceTool: "session_goal_continue",
+    expiredSkillAuthoringMessage:
+      "Skill authoring requires a fresh user request after the previous turn settled.",
+  });
+  // A session-event turn (for example a background exec completion) owns an
+  // occurrence-scoped signal, settlement hooks, and one-shot source delivery that
+  // all end when the event settles. The Goal turn outlives that occurrence, so it
+  // keeps only its own cancellation and the session's ordinary routed delivery.
+  const eventSource = Boolean(base.run.internalEventExecution);
+  const sourceSignal = eventSource ? undefined : base.abortSignal;
   const nudge: FollowupRun = {
-    ...buildTranscriptFollowupRun(base, {
-      prompt:
-        "Advance the active goal; keep it active until fully achieved. Use the current goal context, and verify the entire objective before marking it complete.",
-      sourceTool: "session_goal_continue",
-      expiredSkillAuthoringMessage:
-        "Skill authoring requires a fresh user request after the previous turn settled.",
-    }),
+    ...transcript,
+    ...(eventSource
+      ? {
+          run: { ...transcript.run, internalEventExecution: undefined },
+          queuedFollowupReplyDisposition: undefined,
+        }
+      : {}),
     goalContinuation: continuation,
     summaryLine: "goal-continuation",
     messageId: ["goal", continuation.sessionId, continuation.goalId, params.sourceRunId].join(":"),
-    abortSignal: base.abortSignal
-      ? AbortSignal.any([base.abortSignal, cancellation.signal])
+    abortSignal: sourceSignal
+      ? AbortSignal.any([sourceSignal, cancellation.signal])
       : cancellation.signal,
     controllerInput: params.controllerInput,
     strandedReplyRetry: undefined,
