@@ -16,6 +16,11 @@ const nodeFile = "src/process/spawn-broker/cleanup.test.ts";
 const bunFile = "src/process/spawn-broker/context.test.ts";
 const validatorFile = "src/agents/agent-tools.execution-validation.test.ts";
 const agentBunFile = "src/agents/agent-tools.policy.test.ts";
+const codeModeFiles = [
+  "src/agents/code-mode.bridge.lifecycle.test.ts",
+  "src/agents/code-mode-engine-parity.test.ts",
+  "src/agents/code-mode.failure-phase.test.ts",
+];
 // Gateway-core files precede database-worker files for the focused owner assertion.
 const sessionWeakRefFiles = [
   "src/gateway/session-list-history-retention.test.ts",
@@ -60,6 +65,108 @@ function expectIncludes(calls: Awaited<ReturnType<typeof recordRun>>["calls"], e
   expect(actual).toEqual(["node", "bun"].map((runtime) => ({ runtime, includes: expected })));
 }
 
+async function discoverRun(calls: Awaited<ReturnType<typeof recordRun>>["calls"]) {
+  return Promise.all(
+    calls.map(async ({ args, includes, runtime }) => {
+      const ignore = args
+        .filter((arg) => arg.startsWith("--exclude="))
+        .map((arg) => arg.slice("--exclude=".length));
+      const files = await glob(
+        includes!.map((file) => path.relative("src", file)),
+        { cwd: "src", ignore },
+      );
+      const filters = args.filter((arg) => path.isAbsolute(arg));
+      return {
+        runtime,
+        files: files
+          .filter((file) => !filters.length || filters.includes(path.resolve("src", file)))
+          .map((file) => `src/${file}`)
+          .toSorted(),
+      };
+    }),
+  );
+}
+
+it.each(codeModeFiles)("runs %s on both hosts for exact target spellings", async (file) => {
+  for (const target of [file, `./${file}`, path.resolve(file)]) {
+    const { calls } = await recordRun({ kind: "target", name: "code-mode", target });
+    expect(
+      calls.map(({ runtime, args }) => ({
+        runtime,
+        files: args.map((arg) => path.resolve(arg)),
+      })),
+    ).toEqual(["node", "bun"].map((runtime) => ({ runtime, files: [path.resolve(file)] })));
+    expect(requiresBun({ targets: [target] }, "bun-all")).toBe(true);
+  }
+});
+
+it.each(["node", "bun-all", "dual-all"] as const)(
+  "retains Code Mode host coverage and Node-only exceptions under %s",
+  async (policy) => {
+    const includePatterns = [
+      ...codeModeFiles,
+      nodeFile,
+      bunFile,
+      "src/agents/code-mode-node.lifecycle.test.ts",
+    ];
+    const { calls, exitCode } = await recordRun(
+      {
+        kind: "group",
+        name: "mixed",
+        plan: {
+          configs: [
+            processConfig,
+            "test/vitest/vitest.infra.config.ts",
+            "test/vitest/vitest.agents-core.config.ts",
+          ],
+          includePatterns,
+        },
+      },
+      { OPENCLAW_CI_TEST_RUNTIME_POLICY: policy },
+      true,
+    );
+    expect(exitCode).toBe(1);
+    for (const { args } of calls) {
+      expect(args).toEqual(
+        expect.arrayContaining([
+          processConfig,
+          "test/vitest/vitest.infra.config.ts",
+          "test/vitest/vitest.agents-core.config.ts",
+        ]),
+      );
+    }
+    expect(await discoverRun(calls)).toEqual([
+      {
+        runtime: "node",
+        files: (policy === "bun-all" ? [...codeModeFiles, nodeFile] : includePatterns).toSorted(),
+      },
+      ...(policy === "node"
+        ? []
+        : [
+            {
+              runtime: "bun",
+              files: includePatterns.filter((file) => file !== nodeFile).toSorted(),
+            },
+          ]),
+    ]);
+  },
+);
+
+it.each([
+  ["infra", codeModeFiles.slice(0, 1)],
+  ["agents-core", codeModeFiles.slice(1)],
+] as const)("qualifies only owned Code Mode files from the %s inventory", async (name, files) => {
+  const { calls } = await recordRun(group(name, `test/vitest/vitest.${name}.config.ts`));
+  const nodeArgs = calls.find(({ runtime }) => runtime === "node")!.args;
+  const bunArgs = calls.find(({ runtime }) => runtime === "bun")!.args;
+  expect(nodeArgs.filter((arg) => arg.includes("/code-mode"))).toEqual(
+    files.map((file) => path.resolve(file)),
+  );
+  for (const file of files) {
+    expect(bunArgs).not.toContain(`--exclude=${path.resolve(file)}`);
+  }
+});
+
 it.each([
   [
     "full-agentic",
@@ -74,10 +181,13 @@ it.each([
   const { calls } = await recordRun(plan);
   expect(requiresBun(plan.plan, "bun-all")).toBe(true);
   const expected = files.map((file) => path.resolve(file)).toSorted();
+  const expectedNode = (name === "agents-core" ? [...files, ...codeModeFiles.slice(1)] : files)
+    .map((file) => path.resolve(file))
+    .toSorted();
   const ownerRoot = `${path.resolve(name === "agents-core" ? "src/agents" : "src/gateway")}${path.sep}`;
   const nodeArgs = calls.find(({ runtime }) => runtime === "node")?.args ?? [];
   const bunArgs = calls.find(({ runtime }) => runtime === "bun")?.args ?? [];
-  expect(nodeArgs.filter((arg) => arg.startsWith(ownerRoot)).toSorted()).toEqual(expected);
+  expect(nodeArgs.filter((arg) => arg.startsWith(ownerRoot)).toSorted()).toEqual(expectedNode);
   expect(
     bunArgs
       .filter((arg) => arg.startsWith(`--exclude=${ownerRoot}`))
@@ -120,26 +230,7 @@ it.each(["bun-all", "dual-all"] as const)(
         true,
       );
       expect(exitCode).toBe(1);
-      const discovered = await Promise.all(
-        calls.map(async ({ args, includes, runtime }) => {
-          const ignore = args
-            .filter((arg) => arg.startsWith("--exclude="))
-            .map((arg) => arg.slice("--exclude=".length));
-          const files = await glob(
-            includes!.map((file) => path.relative("src", file)),
-            { cwd: "src", ignore },
-          );
-          const filters = args.filter((arg) => path.isAbsolute(arg));
-          return {
-            runtime,
-            files: files
-              .filter((file) => !filters.length || filters.includes(path.resolve("src", file)))
-              .map((file) => `src/${file}`)
-              .toSorted(),
-          };
-        }),
-      );
-      expect(discovered).toEqual([
+      expect(await discoverRun(calls)).toEqual([
         {
           runtime: "node",
           files: policy === "dual-all" ? [nodeTarget, bunTarget].toSorted() : [nodeTarget],
