@@ -13,16 +13,8 @@ const makeRepo = createPublisherRepoFactory({
 let key: string;
 function fixture(signed: boolean, merge: boolean, mode = "auto", allow = false) {
   const f = makeRepo();
-  f.env = {
-    PATH: process.env.PATH,
-    TMPDIR: process.env.TMPDIR,
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_ALLOW_PROTOCOL: "file",
-    GIT_TERMINAL_PROMPT: "0",
-    OPENCLAW_PR_PUSH_MODE: mode,
-    OPENCLAW_ALLOW_UNSIGNED_GIT_PUSH: allow ? "1" : "",
-  };
+  f.env.OPENCLAW_PR_PUSH_MODE = mode;
+  f.env.OPENCLAW_ALLOW_UNSIGNED_GIT_PUSH = allow ? "1" : "";
   if (!key) {
     key = join(templates.make("openclaw-pr-fixture-signer-"), "key");
     expect(spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]).status).toBe(0);
@@ -48,7 +40,9 @@ function fixture(signed: boolean, merge: boolean, mode = "auto", allow = false) 
       "prepared fixture",
     );
   const parents = [f.source];
-  if (merge) parents.push(commit(f.source, [f.source]));
+  if (merge) {
+    parents.push(commit(f.source, [f.source]));
+  }
   f.candidate = commit(f.candidate, parents);
   f.git("reset", "--hard", f.candidate);
   f.write(
@@ -123,10 +117,11 @@ it.each([false, true])("restricts permission fallback to linear history (merge=%
     expect(hosted(f)).toBe(f.source);
     expect(result.stdout).toContain("403 permission denied");
     expect(result.stdout).not.toContain("trying GraphQL");
-  } else
+  } else {
     expect(f.git("rev-parse", hosted(f) + "^{tree}")).toBe(
       f.git("rev-parse", f.candidate + "^{tree}"),
     );
+  }
 });
 
 it.each([false, true])("never replays a Git write whose response was lost (merge=%s)", (merge) => {
