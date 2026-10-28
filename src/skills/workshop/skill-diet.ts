@@ -3,15 +3,22 @@
 // rest is tightened, and a separate reviewer must confirm that no rule was lost or weakened
 // before one versioned write publishes the result.
 import path from "node:path";
+import { safeParseJson } from "@openclaw/normalization-core/json-coercion";
+import {
+  asNonArrayRecord,
+  asOptionalRecord,
+  isStringArray,
+} from "@openclaw/normalization-core/record-coerce";
+import { readNonBlankString, readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { canonicalizePath } from "../../agents/utils/paths.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { pathExists } from "../../infra/fs-safe.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { WorkshopChange } from "./changes.kernel.js";
 import { resolveSkillWorkshopConfig } from "./config.js";
 import {
+  listSkillFiles,
   listWorkshopSkills,
   mutateSkill,
   publishSkillOverlay,
@@ -24,6 +31,7 @@ import {
 import { MAX_BODY_BYTES } from "./skill-lint.js";
 import { isSkillUsageTracked, readSkillUsage } from "./skill-usage.js";
 import { resolveWorkshopSkillsDir } from "./skills-root.js";
+import { isSkillWorkshopDeniedForAgent } from "./tool-policy-diagnostic.js";
 
 const log = createSubsystemLogger("skills/workshop");
 
@@ -147,21 +155,19 @@ function headingAnchors(text: string): Set<string> {
 function parseJsonObject(text: string): Record<string, unknown> {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  let value: unknown;
-  try {
-    value = start >= 0 && end > start ? JSON.parse(text.slice(start, end + 1)) : undefined;
-  } catch {
-    value = undefined;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  const value =
+    start >= 0 && end > start
+      ? asOptionalRecord(safeParseJson(text.slice(start, end + 1)))
+      : undefined;
+  if (!value) {
     throw new SkillDietRejected("model reply was not a JSON object");
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
-function readString(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  if (typeof value !== "string" || !value.trim()) {
+function requireText(record: Record<string, unknown>, key: string): string {
+  const value = readNonBlankString(record[key]);
+  if (value === undefined) {
     throw new SkillDietRejected(`model reply is missing "${key}"`);
   }
   return value;
@@ -171,20 +177,17 @@ function parsePlan(text: string): { skill: string; references: ReferencePlan[] }
   const reply = parseJsonObject(text);
   const references = Array.isArray(reply.references) ? reply.references : [];
   return {
-    skill: readString(reply, "skill"),
+    skill: requireText(reply, "skill"),
     references: references.map((entry: unknown) => {
-      const record = (typeof entry === "object" && entry !== null ? entry : {}) as Record<
-        string,
-        unknown
-      >;
+      const record = asNonArrayRecord(entry);
       const sections = record.sections;
-      if (!Array.isArray(sections) || !sections.every((heading) => typeof heading === "string")) {
+      if (!isStringArray(sections)) {
         throw new SkillDietRejected("model reply has a reference without section headings");
       }
       return {
-        file: readString(record, "file"),
-        title: readString(record, "title"),
-        readWhen: readString(record, "readWhen"),
+        file: requireText(record, "file"),
+        title: requireText(record, "title"),
+        readWhen: requireText(record, "readWhen"),
         sections,
       };
     }),
@@ -197,15 +200,12 @@ function parseAudit(text: string): AuditFinding[] {
     throw new SkillDietRejected("reviewer reply is missing findings");
   }
   return findings.map((finding: unknown) => {
-    const record = (typeof finding === "object" && finding !== null ? finding : {}) as Record<
-      string,
-      unknown
-    >;
-    return {
-      rule: String(record.rule ?? ""),
-      problem: String(record.problem ?? ""),
-      detail: String(record.detail ?? ""),
-    };
+    const record = asNonArrayRecord(finding);
+    // A finding still counts when the reviewer returns a field in another JSON shape.
+    const [rule, problem, detail] = [record.rule, record.problem, record.detail].map(
+      (value) => readStringValue(value) ?? JSON.stringify(value ?? ""),
+    );
+    return { rule: rule ?? "", problem: problem ?? "", detail: detail ?? "" };
   });
 }
 
@@ -245,7 +245,7 @@ function buildCandidate(params: {
         throw new SkillDietRejected(`section "${heading}" is unknown or moved twice`);
       }
       // An in-page link's target depends on the file it sits in; moving it could silently retarget it.
-      if (/\]\(#/.test(section.text)) {
+      if (section.text.includes("](#")) {
         throw new SkillDietRejected(`section "${heading}" has in-page links and cannot move`);
       }
       moved.add(heading);
@@ -295,10 +295,14 @@ function buildCandidate(params: {
       }
     }
   }
-  // Every anchor into SKILL.md or a new reference, from any file of the skill, must land on a
-  // heading of that file. A skill whose links were already broken is left undieted.
+  // Every anchor into a Markdown file of the next skill (SKILL.md, a new reference, or an
+  // existing one), from any file of the skill, must land on a heading of that file. A skill
+  // whose links were already broken is left undieted.
   const anchorsAt = new Map(
-    files.map(([file, content]) => [path.resolve(params.skillDir, file), headingAnchors(content)]),
+    [...params.liveReferences, ...files].map(([file, content]) => [
+      path.resolve(params.skillDir, file),
+      headingAnchors(content),
+    ]),
   );
   for (const [file, content] of [...files, ...params.liveReferences]) {
     for (const [, target = ""] of content.matchAll(MARKDOWN_LINK)) {
@@ -376,12 +380,29 @@ async function audit(
   );
 }
 
-/** Writes the next skill in one versioned change, refusing if the skill changed meanwhile. */
+/** The skill's Markdown support files with their contents, in listing order. */
+async function readSupportMarkdown(
+  skillDir: string,
+  files: readonly string[],
+): Promise<Array<[string, string]>> {
+  const markdown: Array<[string, string]> = [];
+  for (const file of files.filter((entry) => entry !== SKILL_FILE && entry.endsWith(".md"))) {
+    markdown.push([file, (await readSkillFile(skillDir, file)) ?? ""]);
+  }
+  return markdown;
+}
+
+/**
+ * Writes the next skill in one versioned change. The candidate was validated against the live
+ * file list, SKILL.md and Markdown support files; any change to them meanwhile refuses the diet.
+ */
 async function publishDiet(params: {
   config: OpenClawConfig;
   agentId: string;
   name: string;
+  liveFiles: readonly string[];
   liveSkillMd: string;
+  liveReferences: ReadonlyArray<readonly [string, string]>;
   candidate: Candidate;
   summary: string;
   assertLive: () => void;
@@ -393,13 +414,12 @@ async function publishDiet(params: {
     params.name,
     "write_file",
     async (paths) => {
-      const added = [...candidate.references.keys()];
-      const created = await Promise.all(
-        added.map((file) => pathExists(path.join(paths.skillDir, file))),
-      );
+      const { files: currentFiles } = await listSkillFiles(paths.skillDir);
       if (
+        currentFiles.join("\n") !== params.liveFiles.join("\n") ||
         (await readSkillFile(paths.skillDir, SKILL_FILE)) !== params.liveSkillMd ||
-        created.some(Boolean)
+        JSON.stringify(await readSupportMarkdown(paths.skillDir, currentFiles)) !==
+          JSON.stringify(params.liveReferences)
       ) {
         throw new WorkshopWriteError(`Skill "${params.name}" changed during its diet.`);
       }
@@ -426,10 +446,7 @@ export async function dietWorkshopSkill(params: {
     return undefined;
   }
   const sections = splitSkillSections(liveSkillMd.slice(frontmatter.length));
-  const liveReferences: Array<[string, string]> = [];
-  for (const file of live.files.filter((entry) => entry !== SKILL_FILE && entry.endsWith(".md"))) {
-    liveReferences.push([file, (await readSkillFile(skillDir, file)) ?? ""]);
-  }
+  const liveReferences = await readSupportMarkdown(skillDir, live.files);
   const build = (skill: string, references: readonly ReferencePlan[]) =>
     buildCandidate({
       config,
@@ -460,7 +477,7 @@ export async function dietWorkshopSkill(params: {
           prompt: `######## ORIGINAL\n${liveSkillMd}\n\n######## YOUR REWRITE\n${renderAfter(candidate)}\n\n######## FINDINGS\n${JSON.stringify(findings, null, 2)}`,
         }),
       );
-      candidate = build(readString(repaired, "skill"), plan.references);
+      candidate = build(requireText(repaired, "skill"), plan.references);
       findings = await audit(complete, liveSkillMd, candidate);
     }
     if (findings.length > 0) {
@@ -480,7 +497,14 @@ export async function dietWorkshopSkill(params: {
       (candidate.references.size > 0
         ? `; moved ${moved} section(s) to ${[...candidate.references.keys()].join(", ")}`
         : "");
-    return await publishDiet({ ...params, liveSkillMd, candidate, summary });
+    return await publishDiet({
+      ...params,
+      liveFiles: live.files,
+      liveSkillMd,
+      liveReferences,
+      candidate,
+      summary,
+    });
   } catch (error) {
     if (!(error instanceof SkillDietRejected) && !(error instanceof WorkshopWriteError)) {
       throw error;
@@ -533,11 +557,15 @@ export async function selectSkillForDiet(
   return ranked[Math.floor(nowMs / DAY_MS) % ranked.length]?.name;
 }
 
-/** One diet model call on the agent's primary model: no tools, no transcript. */
+/**
+ * One diet model call on the agent's primary model: no tools, no transcript. `assertLive` runs
+ * before credential handoff and dispatch of every call.
+ */
 async function createSkillDietCompletion(
   config: OpenClawConfig,
   agentId: string,
   abortSignal: AbortSignal,
+  assertLive: () => void,
 ): Promise<SkillDietComplete> {
   const { prepareUtilityCompletionForAgent, runUtilityCompletion } =
     await import("../../agents/utility-completion.js");
@@ -553,6 +581,7 @@ async function createSkillDietCompletion(
         thinkLevel: "medium",
         timeoutMs: COMPLETION_TIMEOUT_MS,
         abortSignal,
+        assertCurrent: assertLive,
         answerTokenBudget: ANSWER_TOKEN_BUDGET,
       })
     ).text;
@@ -571,19 +600,30 @@ export async function runWorkshopSkillDiet(params: {
   if (!name) {
     return undefined;
   }
-  // The pass was admitted under the turn's config; the operator may have left auto mode since.
+  // The pass was admitted under the turn's config; since then the operator may have left auto
+  // mode or denied skill_workshop for this agent.
   const assertLive = () => {
-    if (resolveSkillWorkshopConfig(getRuntimeConfig()).autonomous.mode !== "auto") {
+    const live = getRuntimeConfig();
+    if (resolveSkillWorkshopConfig(live).autonomous.mode !== "auto") {
       throw new WorkshopWriteError("Learning is no longer in auto mode.");
+    }
+    if (isSkillWorkshopDeniedForAgent(live, agentId)) {
+      throw new WorkshopWriteError("The agent's tool policy now denies skill_workshop.");
     }
   };
   assertLive();
+  const complete =
+    params.complete ??
+    (await createSkillDietCompletion(config, agentId, params.abortSignal, assertLive));
   return await dietWorkshopSkill({
     config,
     agentId,
     name,
-    complete:
-      params.complete ?? (await createSkillDietCompletion(config, agentId, params.abortSignal)),
+    // Recheck before each call; the completion owner rechecks again after its own preparation.
+    complete: async (request) => {
+      assertLive();
+      return await complete(request);
+    },
     assertLive,
   });
 }

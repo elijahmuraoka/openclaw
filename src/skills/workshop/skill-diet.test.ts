@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -169,6 +170,13 @@ it.each([
   ],
   ["an invented anchor", PLAN.replace("(references/branches.md)", "(references/branches.md#nope)")],
   [
+    "an anchor missing from an existing reference",
+    PLAN.replace(
+      "(references/branches.md)",
+      "(references/branches.md) [v](references/checks.md#nope)",
+    ),
+  ],
+  [
     "an in-page link to a moved heading",
     PLAN.replace("from the exact tag.", "from the exact tag; see [rollback](#rollback)."),
   ],
@@ -244,6 +252,11 @@ it("refuses to move sections of a skill with titled links", async () => {
 it.each([
   ["its SKILL.md changed", "SKILL.md", `${LIVE}\nA new lesson.\n`],
   ["a new reference path was created", "references/branches.md", "# Saved by hand\n"],
+  [
+    "a support file gained a link into a moved section",
+    "references/checks.md",
+    "See [rollback](../SKILL.md#rollback).\n",
+  ],
 ])("refuses to publish when %s during the diet", async (_label, file, content) => {
   await seed();
   const { complete } = scripted({ audits: [] });
@@ -257,6 +270,47 @@ it.each([
   expect(await diet(changing)).toBeUndefined();
   expect((await live(file)).content).toBe(content);
 });
+
+const OVERSIZED = `${LIVE}\n${filler("more", 4000)}\n`;
+const DENIED: OpenClawConfig = {
+  agents: { entries: { main: { tools: { deny: ["skill_workshop"] } } } },
+};
+const runDiet = (complete: SkillDietComplete) =>
+  runWorkshopSkillDiet({
+    config: {},
+    agentId: "main",
+    nowMs: Date.now(),
+    abortSignal: new AbortController().signal,
+    complete,
+  });
+
+it("sends nothing to the model for an agent whose tool policy denies skill_workshop", async () => {
+  await seed(OVERSIZED);
+  setRuntimeConfigSnapshot(DENIED);
+  const { complete, calls } = scripted({ audits: [clean] });
+  await expect(runDiet(complete)).rejects.toThrow(/denies skill_workshop/);
+  expect(calls).toEqual([]);
+  expect((await live()).content).toBe(OVERSIZED);
+});
+
+it.each([
+  ["learning leaves auto mode", { skills: { workshop: { autonomous: { mode: "off" } } } }],
+  ["the agent denies skill_workshop", DENIED],
+] satisfies Array<[string, OpenClawConfig]>)(
+  "makes no further model call once %s mid-diet",
+  async (_label, revoked) => {
+    await seed(OVERSIZED);
+    const { complete, calls } = scripted({ audits: [clean] });
+    const revoking: SkillDietComplete = async (request) => {
+      const reply = await complete(request);
+      setRuntimeConfigSnapshot(revoked);
+      return reply;
+    };
+    expect(await runDiet(revoking)).toBeUndefined();
+    expect(calls).toEqual(["plan"]);
+    expect((await live()).content).toBe(OVERSIZED);
+  },
+);
 
 it("diets only oversized, settled skills and rotates through them by day", async () => {
   const nowMs = Date.now();
@@ -283,5 +337,8 @@ it("diets only oversized, settled skills and rotates through them by day", async
   await seed(oversized, 2 * DAY_MS);
   await seed(oversized.replace("name: deploy", "name: other"), 2 * DAY_MS, "other");
   const picks = [nowMs, nowMs + DAY_MS].map((at) => selectSkillForDiet({}, "main", at));
-  expect((await Promise.all(picks)).toSorted()).toEqual(["deploy", "other"]);
+  expect((await Promise.all(picks)).toSorted((a, b) => (a ?? "").localeCompare(b ?? ""))).toEqual([
+    "deploy",
+    "other",
+  ]);
 });

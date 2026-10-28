@@ -57,8 +57,9 @@ export function scheduleSkillExperienceReview(
 
 /**
  * Daily Workshop maintenance in auto mode, at most once a day per agent: archive long-unused
- * learned skills, then diet the most costly oversized one. Runs detached from the finished turn
- * and never affects its result; no scheduler owns this work.
+ * learned skills, then diet the most costly oversized one. An agent whose tool policy denies
+ * skill_workshop opted out and gets no maintenance. Runs detached from the finished turn and
+ * never affects its result; no scheduler owns this work.
  */
 export function scheduleDailyWorkshopMaintenance(config: OpenClawConfig, agentId: string): void {
   if (resolveSkillWorkshopConfig(config).autonomous.mode !== "auto") {
@@ -72,6 +73,10 @@ export function scheduleDailyWorkshopMaintenance(config: OpenClawConfig, agentId
   lastMaintenanceByAgent.set(agentId, nowMs);
   void runWithGatewayDetachedWorkContinuation(async () => {
     // Maintenance loads the library and runtime policy; most turns never need them.
+    const { isSkillWorkshopDeniedForAgent } = await import("./tool-policy-diagnostic.js");
+    if (isSkillWorkshopDeniedForAgent(config, agentId)) {
+      return;
+    }
     const { archiveUnusedWorkshopSkills } = await import("./unused-archive.js");
     const archived = await archiveUnusedWorkshopSkills(config, agentId, nowMs).catch(
       (error: unknown) => {
