@@ -55,6 +55,7 @@ export async function startSessionsSendFollowup(
       return {
         start: {
           ...start,
+          selfHeld: undefined,
           result: jsonResult({
             ...start.result.details,
             sentBeforeError: true,

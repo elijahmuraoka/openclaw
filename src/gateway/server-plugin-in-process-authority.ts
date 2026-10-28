@@ -259,7 +259,7 @@ export function captureOperatorToolGatewayContinuationContextInternal(
         /** Re-enter only the requester selected before transfer, under this retained source. */
         runWithRequester<T>(run: () => Promise<T>): Promise<T> {
           return runInScope(() =>
-            requester?.origin
+            requester
               ? withGatewayToolCallerIdentity(
                   {
                     agentId: requester.agentId,
