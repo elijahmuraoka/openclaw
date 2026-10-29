@@ -100,8 +100,12 @@ function countTestLineDelta(root: string, base: string, staged: boolean) {
   for (let index = 0; index < entries.length; index += 2) {
     const status = entries[index];
     const file = entries[index + 1]!;
-    if (status !== "A") before.push(file);
-    if (status !== "D") after.push(file);
+    if (status !== "A") {
+      before.push(file);
+    }
+    if (status !== "D") {
+      after.push(file);
+    }
   }
   // Git numstat counts unterminated lines; the ceiling counts literal LF bytes.
   // Read only changed sources so both measurements use the same unit.
@@ -110,7 +114,9 @@ function countTestLineDelta(root: string, base: string, staged: boolean) {
 
 function parseCount(source: string, file: string) {
   const value = parseRatchetScalar(source, file);
-  if (!Number.isSafeInteger(value)) throw new Error(`${file} must contain a safe integer`);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${file} must contain a safe integer`);
+  }
   return value;
 }
 
@@ -139,7 +145,9 @@ function loadAllocations(root: string, staged: boolean, ref?: string) {
   }
   for (const file of files) {
     // Worktree deletions remove credit; untracked files never grant it.
-    if (!fs.existsSync(path.join(root, file))) continue;
+    if (!fs.existsSync(path.join(root, file))) {
+      continue;
+    }
     allocations.set(file, parseCount(fs.readFileSync(path.join(root, file), "utf8"), file));
   }
   return allocations;
@@ -147,7 +155,9 @@ function loadAllocations(root: string, staged: boolean, ref?: string) {
 
 function effectiveCeiling(baseline: number, allocations: Map<string, number>) {
   const ceiling = baseline + [...allocations.values()].reduce((sum, value) => sum + value, 0);
-  if (!Number.isSafeInteger(ceiling)) throw new Error("Test line ceiling exceeds a safe integer");
+  if (!Number.isSafeInteger(ceiling)) {
+    throw new Error("Test line ceiling exceeds a safe integer");
+  }
   return ceiling;
 }
 
@@ -209,7 +219,9 @@ export function main(root = process.cwd(), argv = process.argv.slice(2)) {
     }
     if (args.prune && (total < ceiling || allocations.size > 0)) {
       fs.writeFileSync(path.join(root, BASELINE), `${total}\n`);
-      for (const file of allocations.keys()) fs.unlinkSync(path.join(root, file));
+      for (const file of allocations.keys()) {
+        fs.unlinkSync(path.join(root, file));
+      }
       console.log(`Pruned ${BASELINE}: ${ceiling} -> ${total}.`);
     } else {
       console.log(`Test lines OK: ${total}; ceiling: ${ceiling}; slack: ${ceiling - total}.`);

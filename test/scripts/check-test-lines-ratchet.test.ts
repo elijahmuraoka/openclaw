@@ -26,7 +26,9 @@ function fixture(initial: Record<string, string>) {
     git("commit", "-qm", message);
     return git("rev-parse", "HEAD");
   };
-  for (const [name, source] of Object.entries(initial)) files.write(name, source);
+  for (const [name, source] of Object.entries(initial)) {
+    files.write(name, source);
+  }
   git("init", "-q");
   const base = commit("base");
   vi.spyOn(console, "log").mockImplementation(() => {});
