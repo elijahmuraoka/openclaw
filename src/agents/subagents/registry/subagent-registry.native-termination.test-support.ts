@@ -50,19 +50,26 @@ export function registerSupersededNativeTimingTest({
       childSessionKey,
       task: "old timing owner",
     });
-    const termination = mod.markSubagentRunTerminated({
-      runId: "run-released-timing-old",
-      reason: "manual kill",
-    });
+    let terminationSettled = false;
+    const termination = mod
+      .markSubagentRunTerminated({
+        runId: "run-released-timing-old",
+        reason: "manual kill",
+      })
+      .finally(() => {
+        terminationSettled = true;
+      });
     try {
       await entered.promise;
-      expect(getActiveGatewayRootWorkCount()).toBeGreaterThan(0);
+      // The caller joins held cleanup without independent Gateway admission.
+      expect(terminationSettled).toBe(false);
       await mod.registerSubagentRun({
         runId: "run-released-timing-new",
         childSessionKey,
         task: "new timing owner",
       });
       await mod.releaseSubagentRun("run-released-timing-new");
+      expect(terminationSettled).toBe(false);
     } finally {
       release.resolve();
       expect(await termination).toBe(1);
