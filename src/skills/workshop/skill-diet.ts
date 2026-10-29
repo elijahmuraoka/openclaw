@@ -31,7 +31,6 @@ import {
 import { MAX_BODY_BYTES } from "./skill-lint.js";
 import { isSkillUsageTracked, readSkillUsage } from "./skill-usage.js";
 import { resolveWorkshopSkillsDir } from "./skills-root.js";
-import { isSkillWorkshopDeniedForAgent } from "./tool-policy-diagnostic.js";
 
 const log = createSubsystemLogger("skills/workshop");
 
@@ -557,15 +556,11 @@ export async function selectSkillForDiet(
   return ranked[Math.floor(nowMs / DAY_MS) % ranked.length]?.name;
 }
 
-/**
- * One diet model call on the agent's primary model: no tools, no transcript. `assertLive` runs
- * before credential handoff and dispatch of every call.
- */
+/** One diet model call on the agent's primary model: no tools, no transcript. */
 async function createSkillDietCompletion(
   config: OpenClawConfig,
   agentId: string,
   abortSignal: AbortSignal,
-  assertLive: () => void,
 ): Promise<SkillDietComplete> {
   const { prepareUtilityCompletionForAgent, runUtilityCompletion } =
     await import("../../agents/utility-completion.js");
@@ -581,7 +576,6 @@ async function createSkillDietCompletion(
         thinkLevel: "medium",
         timeoutMs: COMPLETION_TIMEOUT_MS,
         abortSignal,
-        assertCurrent: assertLive,
         answerTokenBudget: ANSWER_TOKEN_BUDGET,
       })
     ).text;
@@ -600,26 +594,19 @@ export async function runWorkshopSkillDiet(params: {
   if (!name) {
     return undefined;
   }
-  // The pass was admitted under the turn's config; since then the operator may have left auto
-  // mode or denied skill_workshop for this agent.
+  // The pass was admitted under the turn's config; the operator may have left auto mode since.
   const assertLive = () => {
-    const live = getRuntimeConfig();
-    if (resolveSkillWorkshopConfig(live).autonomous.mode !== "auto") {
+    if (resolveSkillWorkshopConfig(getRuntimeConfig()).autonomous.mode !== "auto") {
       throw new WorkshopWriteError("Learning is no longer in auto mode.");
-    }
-    if (isSkillWorkshopDeniedForAgent(live, agentId)) {
-      throw new WorkshopWriteError("The agent's tool policy now denies skill_workshop.");
     }
   };
   assertLive();
   const complete =
-    params.complete ??
-    (await createSkillDietCompletion(config, agentId, params.abortSignal, assertLive));
+    params.complete ?? (await createSkillDietCompletion(config, agentId, params.abortSignal));
   return await dietWorkshopSkill({
     config,
     agentId,
     name,
-    // Recheck before each call; the completion owner rechecks again after its own preparation.
     complete: async (request) => {
       assertLive();
       return await complete(request);

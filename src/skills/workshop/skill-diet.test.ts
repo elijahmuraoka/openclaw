@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -271,46 +270,26 @@ it.each([
   expect((await live(file)).content).toBe(content);
 });
 
-const OVERSIZED = `${LIVE}\n${filler("more", 4000)}\n`;
-const DENIED: OpenClawConfig = {
-  agents: { entries: { main: { tools: { deny: ["skill_workshop"] } } } },
-};
-const runDiet = (complete: SkillDietComplete) =>
-  runWorkshopSkillDiet({
+it("makes no further model call once learning leaves auto mode mid-diet", async () => {
+  const oversized = `${LIVE}\n${filler("more", 4000)}\n`;
+  await seed(oversized);
+  const { complete, calls } = scripted({ audits: [clean] });
+  const revoking: SkillDietComplete = async (request) => {
+    const reply = await complete(request);
+    setRuntimeConfigSnapshot({ skills: { workshop: { autonomous: { mode: "off" } } } });
+    return reply;
+  };
+  const change = await runWorkshopSkillDiet({
     config: {},
     agentId: "main",
     nowMs: Date.now(),
     abortSignal: new AbortController().signal,
-    complete,
+    complete: revoking,
   });
-
-it("sends nothing to the model for an agent whose tool policy denies skill_workshop", async () => {
-  await seed(OVERSIZED);
-  setRuntimeConfigSnapshot(DENIED);
-  const { complete, calls } = scripted({ audits: [clean] });
-  await expect(runDiet(complete)).rejects.toThrow(/denies skill_workshop/);
-  expect(calls).toEqual([]);
-  expect((await live()).content).toBe(OVERSIZED);
+  expect(change).toBeUndefined();
+  expect(calls).toEqual(["plan"]);
+  expect((await live()).content).toBe(oversized);
 });
-
-it.each([
-  ["learning leaves auto mode", { skills: { workshop: { autonomous: { mode: "off" } } } }],
-  ["the agent denies skill_workshop", DENIED],
-] satisfies Array<[string, OpenClawConfig]>)(
-  "makes no further model call once %s mid-diet",
-  async (_label, revoked) => {
-    await seed(OVERSIZED);
-    const { complete, calls } = scripted({ audits: [clean] });
-    const revoking: SkillDietComplete = async (request) => {
-      const reply = await complete(request);
-      setRuntimeConfigSnapshot(revoked);
-      return reply;
-    };
-    expect(await runDiet(revoking)).toBeUndefined();
-    expect(calls).toEqual(["plan"]);
-    expect((await live()).content).toBe(OVERSIZED);
-  },
-);
 
 it("diets only oversized, settled skills and rotates through them by day", async () => {
   const nowMs = Date.now();
