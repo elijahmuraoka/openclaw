@@ -41,9 +41,7 @@ Own plugin discovery, manifest validation, loading, registry assembly, contract 
 
 ## Model Listing
 
-Product invariants for `models.list`, model pickers (web, TUI, channels), catalogs and provider listings:
-
-- The hot path holds no network request. `models.list`, picker opens and chat replies read the last published rows; provider discovery and catalog refresh run in the background. A provider that never answers delays none of them.
+- The hot path holds no network request. `models.list`, picker opens (web, TUI, channels) and chat replies read the last published rows; provider discovery and catalog refresh run in the background. A provider that never answers delays none of them.
 - `models.list` p99 < 300 ms after any config change, catalog swap, sign-in/out, key removal, plugin reload or restart. Rows and prices publish as one snapshot. During a rebuild, keep serving previous rows and apply removals at once: a removed key, provider or retired model disappears immediately.
 - Signed-in provider: its authenticated listing decides which models appear; the catalog only adds metadata and prices. New models appear without an OpenClaw upgrade. Catalog data comes from the published catalog, never a runtime models.dev fetch.
 - List with the credential and runtime version that will execute the turn. Aliases fold through the shared normalizer on every publication path: one row per model per provider, labeled with its provider.
