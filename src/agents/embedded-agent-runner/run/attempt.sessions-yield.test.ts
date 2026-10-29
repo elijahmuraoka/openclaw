@@ -441,7 +441,7 @@ describe("conditional handoff yield at the runtime boundary", () => {
         return [
           {
             ...createStubTool("retain"),
-            async: false,
+            async: false as const,
             execute: async () => {
               expect(getAgentToolExecutionContext()?.hasUnobservedAsyncToolResults).toBe(false);
               expect(refresh.requestSource()).toBeUndefined();
@@ -505,7 +505,7 @@ describe("conditional handoff yield at the runtime boundary", () => {
                                     id: "later-call",
                                     name: "later",
                                     arguments: {},
-                                    ...(kind === "async" ? { async: true } : {}),
+                                    ...(kind === "async" ? { async: true as const } : {}),
                                   } as const,
                                 ]),
                           ]

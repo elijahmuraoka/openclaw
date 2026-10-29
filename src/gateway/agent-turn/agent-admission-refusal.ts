@@ -1,6 +1,5 @@
 import type { ErrorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { readPreparedRuntimeSelfHold } from "../../agents/prepared-model-runtime-admission.js";
-import type { PrepareAgentRunDispatchParams } from "./agent-run-admission-types.js";
 
 export type AgentAdmissionStage =
   | "runtime-preparation"
@@ -12,6 +11,16 @@ type AgentAdmissionRefusal = Readonly<{
   stage: AgentAdmissionStage;
 }>;
 const refusals = new WeakMap<object, AgentAdmissionRefusal>();
+/** The dispatch ports refusal uses; agent-tool readers import this module, so it stays a leaf. */
+type AgentPreacceptRefusalPorts = {
+  releaseUnacceptedReservation: () => boolean;
+  io: { emitAcceptance: (acceptance: readonly [false, undefined, ErrorShape]) => void };
+};
+/** Admission advances `stage` as it passes each preparation boundary. */
+type AgentPreacceptRefusal = {
+  (error: ErrorShape): Promise<undefined>;
+  stage: AgentAdmissionStage;
+};
 
 /** Admission alone stamps the original guard cause after joining its cleanup. */
 export function recordAgentAdmissionRefusal(
@@ -44,21 +53,25 @@ export function readAgentSelfHeldRefusal(error: unknown) {
 }
 
 export function createAgentPreacceptRefusal(
-  params: Pick<PrepareAgentRunDispatchParams, "releaseUnacceptedReservation" | "io">,
+  params: AgentPreacceptRefusalPorts,
   cleanup: (released?: boolean, failure?: string) => Promise<void>,
-) {
-  const reject = async (error: ErrorShape): Promise<undefined> => {
-    let released = false;
-    try {
-      await cleanup(false, error.message);
-      if (readPreparedRuntimeSelfHold(error)) {
-        released = params.releaseUnacceptedReservation();
+): AgentPreacceptRefusal {
+  const initialStage: AgentAdmissionStage = "runtime-preparation";
+  const reject: AgentPreacceptRefusal = Object.assign(
+    async (error: ErrorShape): Promise<undefined> => {
+      let released = false;
+      try {
+        await cleanup(false, error.message);
+        if (readPreparedRuntimeSelfHold(error)) {
+          released = params.releaseUnacceptedReservation();
+        }
+      } finally {
+        recordAgentAdmissionRefusal(error, reject.stage, released);
+        params.io.emitAcceptance([false, undefined, error]);
       }
-    } finally {
-      recordAgentAdmissionRefusal(error, reject.stage, released);
-      params.io.emitAcceptance([false, undefined, error]);
-    }
-    return undefined;
-  };
-  return Object.assign(reject, { stage: "runtime-preparation" as AgentAdmissionStage });
+      return undefined;
+    },
+    { stage: initialStage },
+  );
+  return reject;
 }

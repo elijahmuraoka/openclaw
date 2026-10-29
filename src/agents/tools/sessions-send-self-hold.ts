@@ -34,6 +34,8 @@ import type { SessionsSendToolOptions } from "./sessions-send-tool.types.js";
 
 type Refusal = NonNullable<ReturnType<typeof readAgentSelfHeldRefusal>>;
 type Result = ReturnType<typeof jsonResult<Record<string, unknown>>>;
+/** Replay runs the ordinary tool executor; its details settle as opaque outcomes. */
+type ReplayResult = ReturnType<typeof jsonResult<unknown>>;
 type Send = {
   runId: string;
   mode: "resume" | "followup";
@@ -71,7 +73,10 @@ const batches = new WeakMap<ReplyOperation, Batch>();
 /** Capture original identity and turn ownership; replay resolves config and policy afresh. */
 export function createSelfHeldSendRetainer(
   options: SessionsSendToolOptions | undefined,
-  replay: (options: SessionsSendToolOptions, args: Record<string, unknown>) => Promise<Result>,
+  replay: (
+    options: SessionsSendToolOptions,
+    args: Record<string, unknown>,
+  ) => Promise<ReplayResult>,
 ) {
   const runId = options?.requesterTurnRunId ?? options?.runId;
   const sessionId = options?.agentSessionId ?? options?.sessionId;

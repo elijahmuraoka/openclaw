@@ -24,6 +24,8 @@ type Ports = Parameters<ReturnType<typeof createPluginReloadLifecycle>["run"]>[0
 function fixture() {
   const order: string[] = [];
   const lifecycle = createPluginReloadLifecycle("original");
+  // Ports expose a read-only view; cases that need no unavailable plugins clear this owner.
+  const unavailablePluginIds = new Set(["missing"]);
   const ports: Ports = {
     previousReloadStatus: undefined,
     channels: {
@@ -32,7 +34,7 @@ function fixture() {
       }),
     },
     recovery: {
-      unavailablePluginIds: new Set(["missing"]),
+      unavailablePluginIds,
       dispose: vi.fn(async () => {
         order.push("dispose");
       }),
@@ -55,7 +57,7 @@ function fixture() {
       log: { error: vi.fn() },
     },
   };
-  return { order, lifecycle, ports };
+  return { order, lifecycle, ports, unavailablePluginIds };
 }
 
 it("waits for recovery disposal before publishing exact health or returning", async ({
@@ -324,7 +326,7 @@ it.for([false, true])(
 
 it("fails private replay health when committed retirement rejects but finalizers succeed", async () => {
   const f = fixture();
-  f.ports.recovery.unavailablePluginIds.clear();
+  f.unavailablePluginIds.clear();
   const failure = new Error("committed registry retirement failed");
   await expect(
     f.lifecycle.run(f.ports, async (facts) => {
@@ -355,7 +357,7 @@ it.each([false, true])(
   "keeps public restored but fails private health after late channel recovery error=%s",
   async (channelRecoveryFailed) => {
     const f = fixture();
-    f.ports.recovery.unavailablePluginIds.clear();
+    f.unavailablePluginIds.clear();
     const failure = new Error("replacement failed");
     await expect(
       f.lifecycle.run(f.ports, async (facts) => {

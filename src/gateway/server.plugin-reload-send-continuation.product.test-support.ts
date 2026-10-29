@@ -557,8 +557,9 @@ it.for(["resume", "followup", "failed-reload"] as const)(
           expect(settlement, JSON.stringify(settlement)).toMatchObject({ status: "ok" });
         }
       }
+      const childSessionKey = child.sessionKey;
       const target = [...subagentRuns.values()].find(
-        (entry) => entry.childSessionKey === child.sessionKey,
+        (entry) => entry.childSessionKey === childSessionKey,
       );
       const entry = await readSessionEntryReadOnlyInWorker({
         agentId: "main",

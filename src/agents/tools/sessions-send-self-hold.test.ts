@@ -138,7 +138,7 @@ it.each([
         .mockImplementation(async (params) => {
           work = params;
           await params.onYield?.("fixture handoff admitted");
-          return jsonResult({ status: "started" });
+          return jsonResult({ status: "started", async: true, message: "fixture handoff started" });
         });
       const effect = vi.fn();
       // Real factory, store, communication gate and guard; transport/handoff are fixtures.
@@ -369,7 +369,7 @@ it.each([
         throw new Error("handoff refused");
       }
       work = params;
-      return jsonResult({ status: "started" });
+      return jsonResult({ status: "started", async: true, message: "fixture handoff started" });
     });
     const effect = vi.fn();
     const replay = vi.fn<Parameters<typeof createSelfHeldSendRetainer>[1]>(async (options) => {
@@ -637,7 +637,7 @@ it.each([false, true])(
         .mockImplementation(async (params) => {
           work = params;
           selected = resolveGatewayToolOperatorSelection();
-          return jsonResult({ status: "started" });
+          return jsonResult({ status: "started", async: true, message: "fixture handoff started" });
         });
       const replay = vi.fn<Parameters<typeof createSelfHeldSendRetainer>[1]>(
         async (_options, args) => jsonResult({ status: "ok", message: args.message }),
