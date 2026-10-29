@@ -182,6 +182,7 @@ vi.mock("../../config/sessions/session-accessor.lifecycle.js", async (importOrig
   resetSessionEntryLifecycle: mocks.resetSessionEntryLifecycle,
 }));
 
+// mock-isolation: Handler lifecycle timestamps come from fixture mocks without reading real transcripts.
 vi.mock("../../config/sessions/lifecycle-read.js", () => ({
   hasTerminalMainSessionTranscriptNewerThanRegistryAsync: async () => false,
   resolveSessionLifecycleTimestampsAsync: async (
