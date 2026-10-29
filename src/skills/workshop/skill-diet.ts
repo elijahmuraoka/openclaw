@@ -478,12 +478,8 @@ export async function dietWorkshopSkill(params: {
       findings = await audit(complete, liveSkillMd, candidate);
     }
     if (findings.length > 0) {
-      throw new SkillDietRejected(
-        `reviewer still found ${findings.length} problem(s): ${findings
-          .map((finding) => finding.rule)
-          .join("; ")
-          .slice(0, 300)}`,
-      );
+      // The findings quote skill text, which stays out of Gateway logs.
+      throw new SkillDietRejected(`reviewer still found ${findings.length} problem(s)`);
     }
     const moved = plan.references.reduce(
       (count, reference) => count + reference.sections.length,
