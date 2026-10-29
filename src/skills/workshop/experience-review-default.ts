@@ -57,7 +57,7 @@ export function scheduleSkillExperienceReview(
 
 /**
  * Daily Workshop maintenance in auto mode, at most once a day per agent: archive long-unused
- * learned skills, then diet the most costly oversized one. An agent whose tool policy denies
+ * learned skills, then diet one oversized skill. An agent whose tool policy denies
  * skill_workshop opted out and gets no maintenance. Runs detached from the finished turn and
  * never affects its result; no scheduler owns this work.
  */

@@ -1,5 +1,5 @@
-// Automatic skill diet: in auto mode, the daily Workshop maintenance pass shrinks the most
-// costly oversized learned skill. Branch-only sections move verbatim into references/, the
+// Automatic skill diet: in auto mode, the daily Workshop maintenance pass shrinks one
+// oversized learned skill. Branch-only sections move verbatim into references/, the
 // rest is tightened, and a separate reviewer must confirm that no rule was lost or weakened
 // before one versioned write publishes the result.
 import path from "node:path";
@@ -10,7 +10,6 @@ import {
   isStringArray,
 } from "@openclaw/normalization-core/record-coerce";
 import { readNonBlankString, readStringValue } from "@openclaw/normalization-core/string-coerce";
-import { canonicalizePath } from "../../agents/utils/paths.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -29,7 +28,6 @@ import {
   WorkshopWriteError,
 } from "./library.js";
 import { MAX_BODY_BYTES } from "./skill-lint.js";
-import { isSkillUsageTracked, readSkillUsage } from "./skill-usage.js";
 import { resolveWorkshopSkillsDir } from "./skills-root.js";
 
 const log = createSubsystemLogger("skills/workshop");
@@ -514,10 +512,10 @@ export async function dietWorkshopSkill(params: {
 }
 
 /**
- * Picks today's skill: oversized skills that have not changed for a day, ordered by context cost
- * (SKILL.md body bytes times recorded uses + 1), rotated by calendar day. The rotation needs no
- * stored state and keeps a skill that cannot be dieted from blocking the rest: it costs one
- * attempt every N days, where N is the number of oversized skills.
+ * Picks today's skill: oversized skills that have not changed for a day, in name order, rotated
+ * by calendar day. The rotation needs no stored state and keeps a skill that cannot be dieted
+ * from blocking the rest: it costs one attempt every N days, where N is the number of oversized
+ * skills.
  */
 export async function selectSkillForDiet(
   config: OpenClawConfig,
@@ -525,35 +523,19 @@ export async function selectSkillForDiet(
   nowMs: number,
 ): Promise<string | undefined> {
   const root = resolveWorkshopSkillsDir(config, agentId);
-  const oversized: Array<{ name: string; bodyBytes: number; skillFile: string }> = [];
+  const oversized: string[] = [];
   for (const skill of await listWorkshopSkills(config, agentId)) {
     // A skill edited within the last day may be mid-use or mid-lesson; leave it to settle.
     if (skill.updatedAtMs > nowMs - DAY_MS) {
       continue;
     }
     const content = (await readSkillFile(path.join(root, skill.name), SKILL_FILE)) ?? "";
-    const bodyBytes = Buffer.byteLength(content.replace(FRONTMATTER, ""));
-    if (bodyBytes > MAX_BODY_BYTES) {
-      oversized.push({
-        name: skill.name,
-        bodyBytes,
-        skillFile: canonicalizePath(path.join(root, skill.name, SKILL_FILE)),
-      });
+    if (Buffer.byteLength(content.replace(FRONTMATTER, "")) > MAX_BODY_BYTES) {
+      oversized.push(skill.name);
     }
   }
-  if (oversized.length === 0) {
-    return undefined;
-  }
-  const usage = isSkillUsageTracked()
-    ? await readSkillUsage(
-        {},
-        oversized.map((entry) => entry.skillFile),
-      )
-    : new Map<string, { useCount: number }>();
-  const cost = (entry: (typeof oversized)[number]) =>
-    entry.bodyBytes * ((usage.get(entry.skillFile)?.useCount ?? 0) + 1);
-  const ranked = oversized.toSorted((a, b) => cost(b) - cost(a) || a.name.localeCompare(b.name));
-  return ranked[Math.floor(nowMs / DAY_MS) % ranked.length]?.name;
+  oversized.sort((a, b) => a.localeCompare(b));
+  return oversized[Math.floor(nowMs / DAY_MS) % oversized.length];
 }
 
 /** One diet model call on the agent's primary model: no tools, no transcript. */

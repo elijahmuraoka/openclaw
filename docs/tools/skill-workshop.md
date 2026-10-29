@@ -151,8 +151,8 @@ its whole `SKILL.md`. In `auto` mode, the daily pass that runs unused-skill
 cleanup also diets one oversized learned skill per agent:
 
 1. **Pick.** A skill qualifies when its `SKILL.md` body is over 12 KB and it
-   has not changed for a day. Qualifying skills are ordered by context cost
-   (body size times recorded uses) and taken in turn, one per day.
+   has not changed for a day. Qualifying skills are taken in turn by name, one
+   per day.
 2. **Rewrite.** The agent's primary model moves whole `##` sections that only
    some runs need into new files under `references/` and ends `SKILL.md`
    with a `## Look up the case` index. It tightens the remaining text and adds
