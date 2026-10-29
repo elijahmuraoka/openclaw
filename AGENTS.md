@@ -104,7 +104,7 @@ Update instructions at owner; no competing rules here.
 ## Read when relevant
 
 - **Plugins/SDK:** [plugins](extensions/AGENTS.md), [loader](src/plugins/AGENTS.md), [SDK](src/plugin-sdk/AGENTS.md) (owns public boundary expansion, including outside callers).
-- **Models, pickers, catalogs, provider listings:** [model listing invariants](src/plugins/AGENTS.md#model-listing).
+- **Models, providers, usage/cost:** [model listing](src/plugins/AGENTS.md#model-listing), [provider plugins](extensions/AGENTS.md#boundary-rules), [usage and cost](src/gateway/AGENTS.md#usage-and-cost).
 - **Channels, message tools/actions, dispatch:** [channel boundary](src/channels/AGENTS.md), [channel responsibilities](docs/plugins/sdk-channel-plugins.md).
 - **Agent tools, prompts, tool results, admission, lifecycle:** [agents](src/agents/AGENTS.md), [Gateway](src/gateway/AGENTS.md).
 - **OpenClaw and OpenClaw Foundation logos:** see the [brand kit](https://github.com/openclaw/carapace/tree/main/brand-kit).
