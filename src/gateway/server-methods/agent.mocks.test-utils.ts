@@ -558,7 +558,7 @@ function selectFreshestTargetFixtureEntry(
 export function resetSessionAccessorMocks() {
   mocks.resetSessionEntryLifecycle
     .mockReset()
-    .mockImplementation(createSessionResetFixture(mocks.updateSessionStore));
+    .mockImplementation(createSessionResetFixture(mocks.patchSessionEntryTarget));
   // These handler fixtures own an in-memory store. Real admission durability
   // and execution-time promotion are covered by the gateway-server suites.
   mocks.stageSessionPendingInput.mockReset().mockImplementation(async (_scope, options) => {
