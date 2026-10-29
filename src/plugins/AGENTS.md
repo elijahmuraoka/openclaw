@@ -39,6 +39,15 @@ Own plugin discovery, manifest validation, loading, registry assembly, contract 
 - Repeated availability checks/catalog selection: prepared local facts. Remote catalog discovery/provider probes → initialization or owner's refresh, never each request/UI render.
 - Keep configured/eligible state distinct from live health. Present credential/cached descriptor ≠ reachable service. Explicit health probes, credential refresh, actual provider/tool execution retain network contracts.
 
+## Model Listing
+
+Product invariants for `models.list`, model pickers (web, TUI, channels), catalogs and provider listings:
+
+- The hot path holds no network request. `models.list`, picker opens and chat replies read the last published rows; provider discovery and catalog refresh run in the background. A provider that never answers delays none of them.
+- `models.list` p99 < 300 ms after any config change, catalog swap, sign-in/out, key removal, plugin reload or restart. During a rebuild, keep serving previous rows and apply removals at once: a removed key, provider or retired model disappears immediately.
+- Signed-in provider: its authenticated listing decides which models appear; the catalog only adds metadata and prices. New models appear without an OpenClaw upgrade. Catalog data comes from the published catalog, never a runtime models.dev fetch.
+- Admission is one core rule, `buildLiveModelProviderConfig` in `src/plugin-sdk/provider-catalog-live-runtime.ts`: every listed chat model, non-chat filtered once. Plugins narrow it only through its `readModelId` selector. Fix listing gaps there, not per provider.
+
 ## Verification
 
 - Loader/registry/activation/public-artifact changes that can change bundled plugin import fanout: `pnpm build`.
