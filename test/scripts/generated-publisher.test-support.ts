@@ -17,7 +17,7 @@ import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 const PUBLISH_GENERATED_PR_ACTION = ".github/actions/publish-generated-pr/action.yml";
 const publisherTemplateDirs = useAutoCleanupTempDirTracker(afterAll);
-let generatedPublisherTemplate: string | undefined;
+let generatedPublisherTemplate: { root: string; initialMain: string } | undefined;
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
@@ -48,16 +48,21 @@ function copyGeneratedPublisherFixture(root: string, workspaceName: string) {
     runGit(worktree, ["remote", "add", "origin", "../origin.git"]);
     runGit(worktree, ["push", "-u", "origin", "main"]);
     runGit(templateRoot, ["--git-dir", origin, "symbolic-ref", "HEAD", "refs/heads/main"]);
-    generatedPublisherTemplate = templateRoot;
+    generatedPublisherTemplate = {
+      root: templateRoot,
+      initialMain: runGit(worktree, ["rev-parse", "HEAD"]),
+    };
   }
   // Relative origin follows each copied repository pair, isolating refs, hooks and config.
+  // The seed stays immutable, so every copy starts at the recorded initial commit.
   for (const name of ["origin.git", "worktree"]) {
     cpSync(
-      path.join(generatedPublisherTemplate, name),
+      path.join(generatedPublisherTemplate.root, name),
       path.join(root, name === "worktree" ? workspaceName : name),
       { recursive: true, mode: fsConstants.COPYFILE_FICLONE },
     );
   }
+  return generatedPublisherTemplate.initialMain;
 }
 
 export type GeneratedPublisherOptions = {
@@ -99,8 +104,7 @@ export function prepareGeneratedPublisherFixture(
   const stalePrViewHeadOnce = path.join(root, "stale-pr-view-head-once");
   const summary = path.join(root, "summary.md");
 
-  copyGeneratedPublisherFixture(root, workspaceName);
-  const initialMain = runGit(worktree, ["rev-parse", "HEAD"]);
+  const initialMain = copyGeneratedPublisherFixture(root, workspaceName);
   let initialBranch = "";
   mkdirSync(fakeBin);
   mkdirSync(runnerTemp, { recursive: true });
@@ -259,13 +263,15 @@ export function prepareGeneratedPublisherFixture(
       RUNNER_TEMP: runnerTemp,
     },
     inspect(publishOutput: string, checkAuth = true) {
-      const authHeader = spawnSync(
-        "git",
-        ["config", "--local", "--get-all", "http.https://github.com/.extraheader"],
-        { cwd: worktree, encoding: "utf8" },
-      );
-      if (checkAuth && (authHeader.status !== 1 || authHeader.stdout.trim() !== "")) {
-        throw new Error("generated publisher left its Git authorization header configured");
+      if (checkAuth) {
+        const authHeader = spawnSync(
+          "git",
+          ["config", "--local", "--get-all", "http.https://github.com/.extraheader"],
+          { cwd: worktree, encoding: "utf8" },
+        );
+        if (authHeader.status !== 1 || authHeader.stdout.trim() !== "") {
+          throw new Error("generated publisher left its Git authorization header configured");
+        }
       }
 
       const branchRef = "refs/heads/" + headBranch;
