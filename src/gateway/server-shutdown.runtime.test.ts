@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   waitForPluginCacheRetirement: vi.fn(async () => undefined),
 }));
 
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("./server-close.runtime.js", () =>
   state.loadedMock("server-close", {
     prepareGatewayClose: state.prepareClose,
@@ -25,14 +26,17 @@ vi.mock("./server-close.runtime.js", () =>
     runGatewayClosePrelude: vi.fn(),
   }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../plugins/hook-runner-global.js", () =>
   state.loadedMock("plugin-hooks", { runGlobalGatewayStopSafely: state.stopPlugins }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("./server-methods/session-change-event.js", () =>
   state.loadedMock("session-change-events", {
     flushPendingSessionsChangedEvents: state.flushSessionChanges,
   }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("./session-event-prepared-row.js", () =>
   state.loadedMock("session-event-publications", {
     get drainSessionEventPublications() {
@@ -43,35 +47,44 @@ vi.mock("./session-event-prepared-row.js", () =>
     },
   }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("./mcp-http.js", () => state.loadedMock("mcp-http", { closeMcpLoopbackServer: vi.fn() }));
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../agents/agent-bundle-lsp-runtime.js", () =>
   state.loadedMock("bundle-lsp", { disposeAllBundleLspRuntimes: vi.fn() }),
 );
 vi.mock("./embeddings-http.js", () => {
   throw new Error("shutdown preparation must not load embeddings HTTP");
 });
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("./embeddings-provider-lifetime.js", () =>
   state.loadedMock("embeddings", {
     drainRetainedOpenAiEmbeddingProviders: state.drainEmbeddingProviders,
   }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../hooks/gmail-watcher.js", () =>
   state.loadedMock("gmail-watcher", { stopGmailWatcher: vi.fn() }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../cron/maintenance.js", () =>
   state.loadedMock("cron-maintenance", { stopCronMaintenance: vi.fn() }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../agents/code-mode-state.js", () =>
   state.loadedMock("code-mode", { disposeAllCodeModeRuns: vi.fn() }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../agents/provider-transport-dispatcher-pool.js", () =>
   state.loadedMock("provider-transports", { closeProviderTransportDispatcherPool: vi.fn() }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../plugins/runtime.js", () =>
   state.loadedMock("plugin-runtime", {
     prepareActivePluginRegistryShutdown: state.preparePluginRegistryShutdown,
   }),
 );
+// mock-isolation: records which runtime modules shutdown preparation loads.
 vi.mock("../plugins/plugin-cache.js", () =>
   state.loadedMock("plugin-cache", {
     get waitForPluginCacheRetirement() {

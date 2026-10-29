@@ -39,6 +39,7 @@ vi.mock("../logging/subsystem.js", () => ({
   createSubsystemLogger: () => ({ info: vi.fn() }),
 }));
 
+// mock-isolation: replaces core startup to observe only broker and admission ownership.
 vi.mock("./server-start.js", () => ({
   startGatewayServerCore: async () => {
     const { runExec } = await import("../process/exec.js");
