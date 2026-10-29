@@ -47,7 +47,7 @@ Own plugin discovery, manifest validation, loading, registry assembly, contract 
 - List with the credential and runtime version that will execute the turn. Aliases fold through the shared normalizer on every publication path: one row per model per provider, labeled with its provider.
 - A failed listing keeps the last good rows and names the provider; a successful empty listing replaces them. Bundled rows never stand in for either.
 - Thinking levels, request shape and toggles come from listed capabilities through one resolver, never exact model-ID rules. Offer only controls request construction honors.
-- Admission is one core rule, `buildLiveModelProviderConfig` in `src/plugin-sdk/provider-catalog-live-runtime.ts`: every listed chat model, non-chat filtered once. Plugins narrow it only through its `readModelId` selector. Fix listing gaps there, not per provider.
+- Admission is one core rule, `buildLiveModelProviderConfig` in `src/plugin-sdk/provider-catalog-live-runtime.ts`: every listed chat model, non-chat filtered once. Plugins narrow it only through its documented gates (`readModelId`, `acceptUnknownModel`, capability-aware projections that drop rows whose request shape they cannot build). Fix listing gaps there, not per provider.
 
 ## Verification
 
