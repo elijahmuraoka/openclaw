@@ -33,7 +33,8 @@ describe("terminal content fingerprints", () => {
   it("preserves the rich-content, media, and import tuple with deterministic key order", () => {
     const image = { type: "image", source: { data: "synthetic", mediaType: "image/png" } };
     const content = [{ type: "text", text: "rich reply" }, image];
-    const media = [{ url: "https://example.com/image.png", mimeType: "image/png" }];
+    const attachment = { url: "https://example.com/image.png", mimeType: "image/png" };
+    const media = [attachment];
     const metadata = {
       media,
       importedFrom: "fixture",
@@ -52,7 +53,7 @@ describe("terminal content fingerprints", () => {
           content[0],
           { source: { mediaType: "image/png", data: "synthetic" }, type: "image" },
         ],
-        __openclaw: { ...metadata, media: [{ mimeType: "image/png", url: media[0].url }] },
+        __openclaw: { ...metadata, media: [{ mimeType: "image/png", url: attachment.url }] },
       }),
     ).toBe(identity);
     for (const changed of [
@@ -63,7 +64,10 @@ describe("terminal content fingerprints", () => {
       },
       {
         ...message,
-        __openclaw: { ...metadata, media: [{ ...media[0], url: "https://example.com/other.png" }] },
+        __openclaw: {
+          ...metadata,
+          media: [{ ...attachment, url: "https://example.com/other.png" }],
+        },
       },
       { ...message, __openclaw: { ...metadata, importedFrom: "other" } },
       { ...message, __openclaw: { ...metadata, cliSessionId: "other" } },
