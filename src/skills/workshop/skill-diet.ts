@@ -543,6 +543,7 @@ async function createSkillDietCompletion(
   config: OpenClawConfig,
   agentId: string,
   abortSignal: AbortSignal,
+  assertLive: () => void,
 ): Promise<SkillDietComplete> {
   const { prepareUtilityCompletionForAgent, runUtilityCompletion } =
     await import("../../agents/utility-completion.js");
@@ -558,6 +559,7 @@ async function createSkillDietCompletion(
         thinkLevel: "medium",
         timeoutMs: COMPLETION_TIMEOUT_MS,
         abortSignal,
+        assertCurrent: assertLive,
         answerTokenBudget: ANSWER_TOKEN_BUDGET,
       })
     ).text;
@@ -584,7 +586,8 @@ export async function runWorkshopSkillDiet(params: {
   };
   assertLive();
   const complete =
-    params.complete ?? (await createSkillDietCompletion(config, agentId, params.abortSignal));
+    params.complete ??
+    (await createSkillDietCompletion(config, agentId, params.abortSignal, assertLive));
   return await dietWorkshopSkill({
     config,
     agentId,
