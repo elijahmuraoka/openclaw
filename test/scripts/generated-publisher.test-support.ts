@@ -5,16 +5,13 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll } from "vitest";
 import { parse } from "yaml";
-import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
+import { createTempDirTracker, useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 const PUBLISH_GENERATED_PR_ACTION = ".github/actions/publish-generated-pr/action.yml";
 const publisherTemplateDirs = useAutoCleanupTempDirTracker(afterAll);
 let generatedPublisherTemplate: { root: string; initialMain: string } | undefined;
@@ -48,13 +45,10 @@ function copyGeneratedPublisherFixture(root: string, workspaceName: string) {
     runGit(worktree, ["remote", "add", "origin", "../origin.git"]);
     runGit(worktree, ["push", "-u", "origin", "main"]);
     runGit(templateRoot, ["--git-dir", origin, "symbolic-ref", "HEAD", "refs/heads/main"]);
-    generatedPublisherTemplate = {
-      root: templateRoot,
-      initialMain: runGit(worktree, ["rev-parse", "HEAD"]),
-    };
+    const initialMain = runGit(worktree, ["rev-parse", "HEAD"]);
+    generatedPublisherTemplate = { root: templateRoot, initialMain };
   }
-  // Relative origin follows each copied repository pair, isolating refs, hooks and config.
-  // The seed stays immutable, so every copy starts at the recorded initial commit.
+  // Immutable seed and relative origin isolate each copy's initial commit, refs, hooks and config.
   for (const name of ["origin.git", "worktree"]) {
     cpSync(
       path.join(generatedPublisherTemplate.root, name),
@@ -99,7 +93,6 @@ export function prepareGeneratedPublisherFixture(
   const runnerTemp = path.join(root, "runner-temp");
   const prState = path.join(root, "pr-open");
   const mergeCalls = path.join(root, "merge-calls");
-  const ghCalls = path.join(root, "gh-calls");
   const stalePrHeadOnce = path.join(root, "stale-pr-head-once");
   const stalePrViewHeadOnce = path.join(root, "stale-pr-view-head-once");
   const summary = path.join(root, "summary.md");
@@ -243,7 +236,7 @@ export function prepareGeneratedPublisherFixture(
       FAKE_MALFORMED_AUTO_MERGE_RECORD: String(options.malformedAutoMergeRecord ?? false),
       FAKE_ORIGIN: origin,
       FAKE_HEAD_BRANCH: headBranch,
-      FAKE_GH_CALLS: ghCalls,
+      FAKE_GH_CALLS: path.join(root, "gh-calls"),
       FAKE_MERGE_CALLS: mergeCalls,
       FAKE_PR_STATE: prState,
       FAKE_STALE_HEAD_ONCE: stalePrHeadOnce,
@@ -300,7 +293,8 @@ export function runGeneratedPublisherScenario(
   baseChangePath: "a" | "b" | null,
   options: GeneratedPublisherOptions = {},
 ) {
-  const root = mkdtempSync(path.join(tmpdir(), "openclaw-generated-pr-"));
+  const tempDirs = createTempDirTracker();
+  const root = tempDirs.make("openclaw-generated-pr-");
   try {
     const fixture = prepareGeneratedPublisherFixture(root, baseChangePath, options);
     const action = parse(readFileSync(PUBLISH_GENERATED_PR_ACTION, "utf8"));
@@ -330,6 +324,6 @@ export function runGeneratedPublisherScenario(
     }
     return fixture.inspect(publishOutput);
   } finally {
-    rmSync(root, { force: true, recursive: true });
+    tempDirs.cleanup();
   }
 }
